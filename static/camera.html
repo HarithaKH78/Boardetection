@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boar Detection — Live Camera</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0f1117;
+            color: #e1e4ea;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            margin: 1.2rem 0 0.4rem;
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #7ee787;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            justify-content: center;
+            padding: 0.8rem;
+            width: 100%;
+            max-width: 960px;
+        }
+        .panel {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            overflow: hidden;
+            flex: 1 1 420px;
+            max-width: 460px;
+        }
+        .panel-header {
+            padding: 0.5rem 0.8rem;
+            background: #21262d;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #8b949e;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        video, canvas {
+            width: 100%;
+            display: block;
+            background: #000;
+        }
+        .controls {
+            padding: 0.6rem 0.8rem;
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        button {
+            padding: 0.45rem 1rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-start { background: #238636; color: #fff; }
+        .btn-start:hover { background: #2ea043; }
+        .btn-stop  { background: #da3633; color: #fff; }
+        .btn-stop:hover  { background: #f85149; }
+        .badge {
+            padding: 0.2rem 0.6rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+        .badge-ok   { background: #238636; color: #fff; }
+        .badge-warn { background: #d29922; color: #000; }
+        .badge-off  { background: #484f58; color: #8b949e; }
+        #stats {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.8rem;
+            color: #8b949e;
+            border-top: 1px solid #30363d;
+        }
+    </style>
+</head>
+<body>
+
+<h1>🐗 Boar Detection — Live Camera</h1>
+
+<div class="container">
+    <!-- Camera feed -->
+    <div class="panel">
+        <div class="panel-header">
+            Camera Feed
+            <span id="camBadge" class="badge badge-off">OFF</span>
+        </div>
+        <video id="video" autoplay playsinline muted></video>
+        <div class="controls">
+            <button id="startBtn" class="btn-start" onclick="startCamera()">Start Camera</button>
+            <button id="stopBtn" class="btn-stop" onclick="stopCamera()" disabled>Stop</button>
+        </div>
+    </div>
+
+    <!-- Detection result -->
+    <div class="panel">
+        <div class="panel-header">
+            Detection Result
+            <span id="detBadge" class="badge badge-off">—</span>
+        </div>
+        <canvas id="canvas"></canvas>
+        <div id="stats">Waiting for camera…</div>
+    </div>
+</div>
+
+<script>
+    const video    = document.getElementById('video');
+    const canvas   = document.getElementById('canvas');
+    const ctx      = canvas.getContext('2d');
+    const camBadge = document.getElementById('camBadge');
+    const detBadge = document.getElementById('detBadge');
+    const stats    = document.getElementById('stats');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn  = document.getElementById('stopBtn');
+
+    let stream   = null;
+    let loopId   = null;
+    let busy     = false;
+    const API    = '/api/detection/frame';
+    const INTERVAL_MS = 500;   // send a frame every 500 ms
+
+    // --- Audio alert (plays in the browser) ---
+    const alertAudio = new Audio('/static/audio.mp3');
+    const ALERT_COOLDOWN_MS = 3000;
+    let lastAlertTime = 0;
+
+    function playAlert() {
+        const now = Date.now();
+        if (now - lastAlertTime >= ALERT_COOLDOWN_MS) {
+            lastAlertTime = now;
+            alertAudio.currentTime = 0;
+            alertAudio.play().catch(() => {});  // ignore autoplay restrictions
+        }
+    }
+
+    async function startCamera() {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+            });
+            video.srcObject = stream;
+            camBadge.textContent = 'LIVE';
+            camBadge.className = 'badge badge-ok';
+            startBtn.disabled = true;
+            stopBtn.disabled  = false;
+            loopId = setInterval(sendFrame, INTERVAL_MS);
+        } catch (err) {
+            alert('Camera error: ' + err.message);
+        }
+    }
+
+    function stopCamera() {
+        if (loopId) clearInterval(loopId);
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        video.srcObject = null;
+        camBadge.textContent = 'OFF';
+        camBadge.className = 'badge badge-off';
+        detBadge.textContent = '—';
+        detBadge.className = 'badge badge-off';
+        stats.textContent = 'Camera stopped.';
+        startBtn.disabled = false;
+        stopBtn.disabled  = true;
+    }
+
+    async function sendFrame() {
+        if (busy || !stream) return;
+        busy = true;
+
+        // Grab current frame from video
+        canvas.width  = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+
+        try {
+            const t0  = performance.now();
+            const res = await fetch(API, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: dataUrl }),
+            });
+            const ms   = Math.round(performance.now() - t0);
+            const data = await res.json();
+
+            // Show annotated image on canvas
+            if (data.annotated_image_b64) {
+                const img = new Image();
+                img.onload = () => {
+                    canvas.width  = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                };
+                img.src = 'data:image/jpeg;base64,' + data.annotated_image_b64;
+            }
+
+            // Update badges / stats + play alert
+            if (data.count > 0) {
+                detBadge.textContent = data.count + ' detected';
+                detBadge.className   = 'badge badge-warn';
+                playAlert();
+            } else {
+                detBadge.textContent = 'Clear';
+                detBadge.className   = 'badge badge-ok';
+            }
+            stats.textContent = `Detections: ${data.count} · Latency: ${ms} ms`;
+        } catch (e) {
+            stats.textContent = 'Error: ' + e.message;
+        }
+        busy = false;
+    }
+</script>
+
+</body>
+</html>

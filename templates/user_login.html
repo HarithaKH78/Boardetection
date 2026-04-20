@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Login | Boar Detection</title>
+    <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-vh-100">
+
+<div class="glass-card w-full max-w-sm p-8 rounded-xl shadow-lg">
+    <h2 class="text-3xl font-bold text-center text-gray-800 mb-6">🐗 Boar Admin</h2>
+    <form id="loginForm">
+        <div class="mb-4">
+            <label class="block text-gray-700 text-sm font-bold mb-2">Admin Password</label>
+            <input type="password" id="password" class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter password" required>
+        </div>
+        <p id="errorMsg" class="text-red-500 text-xs italic mb-4 hidden"></p>
+        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition">Login</button>
+    </form>
+</div>
+
+<script src="/static/js/admin.js"></script>
+</body>
+</html>
